@@ -1,6 +1,6 @@
 # Munder Difflin Multi-Agent System Project
 
-Welcome to the starter code repository for the **Munder Difflin Paper Company Multi-Agent System Project**! This repository contains the starter code and tools you will need to design, build, and test a multi-agent system that supports core business operations at a fictional paper manufacturing company.
+Welcome to the starter code repository for the **Munder Difflin Paper Company Multi-Agent System Project**! This repository contains the starter code and tools you will need to design, build, and test[...]
 
 ## Project Context
 
@@ -12,7 +12,7 @@ You’ve been hired as an AI consultant by Munder Difflin Paper Company, a ficti
 
 Your solution must use a maximum of **5 agents** and process inputs and outputs entirely via **text-based communication**.
 
-This project challenges your ability to orchestrate agents using modern Python frameworks like `smolagents`, `pydantic-ai`, or `npcsh`, and combine that with real data tools like `sqlite3`, `pandas`, and LLM prompt engineering.
+This project challenges your ability to orchestrate agents using modern Python frameworks like `smolagents`, `pydantic-ai`, or `npcsh`, and combine that with real data tools like `sqlite3`, `pandas`, [...]
 
 ---
 
