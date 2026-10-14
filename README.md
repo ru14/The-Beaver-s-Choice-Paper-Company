@@ -1,3 +1,4 @@
+<img width="4693" height="2648" alt="mermaid-diagram (1)" src="https://github.com/user-attachments/assets/a801338f-760b-4aef-9cb2-a47426c30216" />
 # Munder Difflin Multi-Agent System Project
 
 Welcome to the starter code repository for the **Munder Difflin Paper Company Multi-Agent System Project**! This repository contains the starter code and tools you will need to design, build, and test[...]
