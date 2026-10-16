@@ -607,14 +607,21 @@ MIN_CASH_RESERVE = 1000.0   # never let a restock drop cash below this
 
 
 def _resolve_item(name: str) -> Union[str, None]:
-    """Map free text to the closest catalog item name (None if nothing is close)."""
-    if name in CATALOG:
-        return name
-    lowered = {k.lower(): k for k in CATALOG}
-    if name.lower() in lowered:
-        return lowered[name.lower()]
-    match = difflib.get_close_matches(name.lower(), list(lowered), n=1, cutoff=0.6)
-    return lowered[match[0]] if match else None
+    """Resolve a catalog item by exact name, ignoring case and surrounding whitespace."""
+    normalized = name.strip().casefold()
+    return next((item for item in CATALOG if item.casefold() == normalized), None)
+
+
+def _suggest_items(description: str, limit: int = 3) -> List[str]:
+    """Suggest catalog names without treating fuzzy matches as confirmed items."""
+    matches = difflib.get_close_matches(
+        description.strip().casefold(),
+        [item.casefold() for item in CATALOG],
+        n=limit,
+        cutoff=0.3,
+    )
+    catalog_names = {item.casefold(): item for item in CATALOG}
+    return [catalog_names[match] for match in matches]
 
 
 def _min_stock(item: str) -> int:
@@ -623,7 +630,24 @@ def _min_stock(item: str) -> int:
 
 
 def _stock(item: str, date: str) -> int:
-    return int(get_stock_level(item, date)["current_stock"].iloc[0])
+    cutoff = f"{date}T23:59:59" if len(date) == 10 else date
+    return int(get_stock_level(item, cutoff)["current_stock"].iloc[0])
+
+
+def _pending_stock_dates(item: str, as_of_date: str) -> List[str]:
+    rows = pd.read_sql(
+        """
+        SELECT DISTINCT date(transaction_date) AS delivery_date
+        FROM transactions
+        WHERE item_name = :item
+          AND transaction_type = 'stock_orders'
+          AND date(transaction_date) > date(:as_of_date)
+        ORDER BY delivery_date
+        """,
+        db_engine,
+        params={"item": item, "as_of_date": as_of_date},
+    )
+    return rows["delivery_date"].tolist()
 
 
 def _unit_price(item: str) -> float:
@@ -652,7 +676,7 @@ def _parse_items(items_json: str) -> List[Dict]:
 
 @tool
 def find_catalog_item(description: str) -> str:
-    """Find the closest official catalog item name for a customer's wording (e.g. 'heavy cardstock' -> 'Cardstock').
+    """Find an exact catalog item name or suggest close names without confirming a match.
 
     Args:
         description: Customer's free-text name of the product.
@@ -660,8 +684,7 @@ def find_catalog_item(description: str) -> str:
     item = _resolve_item(description)
     if item:
         return f"{item} (list price ${_unit_price(item):.2f}/unit)"
-    close = difflib.get_close_matches(description.lower(), [k.lower() for k in CATALOG], n=3, cutoff=0.3)
-    return f"No exact catalog match for '{description}'. Closest candidates: {close}"
+    return f"No exact catalog match for '{description}'. Closest candidates: {_suggest_items(description)}"
 
 
 @tool
@@ -771,14 +794,27 @@ def fulfill_order(items_json: str, as_of_date: str) -> str:
         sale_date = as_of_date
         shortfall = qty - stock
         top_up = max(0, _min_stock(item) - (stock - qty))
-        if shortfall > 0 or top_up > 0:
-            order_qty = max(shortfall, 0) + (int(top_up * RESTOCK_BUFFER) if top_up else 0)
-            msg = restock_item(item, order_qty, as_of_date)
-            if shortfall > 0:
+        if shortfall > 0:
+            pending_dates = _pending_stock_dates(item, as_of_date)
+            available_date = next(
+                (date for date in pending_dates if _stock(item, date) >= qty),
+                None,
+            )
+            if available_date:
+                sale_date = available_date
+                report.append(f"{item}: using previously ordered stock arriving {available_date}.")
+            else:
+                order_qty = shortfall + (int(top_up * RESTOCK_BUFFER) if top_up else 0)
+                msg = restock_item(item, order_qty, as_of_date)
                 if msg.startswith("Restock refused") or "Invalid" in msg:
                     report.append(f"{item}: only {stock} in stock, cannot supply {qty} ({msg})")
                     continue
-                sale_date = get_supplier_delivery_date(as_of_date, order_qty)
+                delivery_date = get_supplier_delivery_date(as_of_date, order_qty)
+                sale_date = delivery_date
+                report.append(f"{item}: {msg}")
+        elif top_up > 0:
+            order_qty = max(shortfall, 0) + (int(top_up * RESTOCK_BUFFER) if top_up else 0)
+            msg = restock_item(item, order_qty, as_of_date)
             report.append(f"{item}: {msg}")
         price = round(qty * _unit_price(item) * (1 - _discount(qty)), 2)
         create_transaction(item, "sales", qty, price, sale_date)
@@ -800,9 +836,9 @@ def get_finances(as_of_date: str) -> str:
 # ---------- Agents ----------
 
 inventory_agent = ToolCallingAgent(
-    tools=[find_catalog_item, check_stock, list_inventory, restock_item], model=model,
+    tools=[find_catalog_item, check_stock, list_inventory], model=model,
     name="inventory_agent",
-    description="Maps customer wording to catalog items, reports stock levels and reorders from the supplier.",
+    description="Maps customer wording to catalog items and reports stock levels. Do not place orders; the ordering agent handles fulfillment.",
 )
 quoting_agent = ToolCallingAgent(
     tools=[find_catalog_item, search_past_quotes, calculate_quote], model=model,
