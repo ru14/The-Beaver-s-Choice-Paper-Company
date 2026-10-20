@@ -24,8 +24,8 @@ All seven required helpers are used on the request path. `generate_financial_rep
 **Why four agents.** Each specialist has a clear, separate job: inventory and quoting only read data, while fulfilment is the only agent that writes. Keeping the writer separate means a quote can never change the database. A fifth agent (for example a separate restocking agent) was considered and rejected. Restocking only ever happens as part of fulfilling a sale, so splitting it out would add another hand-off for the LLM to get wrong without adding any capability.
 
 **Request flow and hand-offs**
-1. *Intake (LLM):* the model turns the request into `{customer wording, catalog name or null, quantity}` lines.
-2. *Validation (code):* each catalog name must match exactly and share a distinctive word with the customer's wording; anything else is "not carried". Code also decides order vs. quote and parses the customer's deadline.
+1. *Intake (LLM, temperature 0):* the model turns the request into `{customer wording, catalog name or null, quantity}` lines. It matches on product type and ignores quality, colour, finish or standard-size words ("A4 glossy paper" → Glossy paper). It returns null when the product or size isn't carried (A3 paper, balloons, tickets).
+2. *Validation (code):* each catalog name must match exactly and share a distinctive word with the customer's wording, with a small synonym map such as "printer" → "copy". Anything else is "not carried". Code also decides order vs. quote, parses the customer's deadline, and adds together repeated lines for the same item.
 3. *Delegation (orchestrator agent):* receives the validated plan and calls `inventory_agent`, then `quoting_agent`, then (orders only) `ordering_agent`.
 4. *Enforcement (tools):* the tools write their results to a per-request ledger (`REQUEST`).
    - `fulfill_order` refuses quote-only requests and items not in the plan.
@@ -42,7 +42,7 @@ All seven required helpers are used on the request path. `generate_financial_rep
 - The decision diamond is the per-line outcome inside `_fulfill_line`: FULFILL, DEFER or REJECT.
 
 ## 3. Framework and database
-- **smolagents:** tools are defined with `@tool` (typed arguments and docstrings), agents with `ToolCallingAgent`, and the orchestrator uses `managed_agents`. The model is `OpenAIServerModel`, defaulting to `gpt-4o-mini`, via the Vocareum OpenAI-compatible endpoint.
+- **smolagents:** tools are defined with `@tool` (typed arguments and docstrings), agents with `ToolCallingAgent`, and the orchestrator uses `managed_agents`. The model is `OpenAIServerModel`, defaulting to `gpt-4o-mini`, with `temperature=0` so runs are reproducible, via the Vocareum OpenAI-compatible endpoint.
 - **SQLite:** `munder_difflin.db` is created by the starter's `init_database()`. Stock and cash are derived from the `transactions` table: `stock_orders` add units and cost cash, `sales` remove units and add cash. The starter's assumptions are kept: transactions are dated, and stock and cash are always computed "as of" a date.
 
 ## 4. Business rules
@@ -56,20 +56,30 @@ All seven required helpers are used on the request path. `generate_financial_rep
 - **Record dates:** sales are recorded on the date the goods are available, and stock orders on their delivery date.
 
 ## 5. Results from `test_results.csv` (all 20 sample requests)
-Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 2025-04-24, the last delivery): **cash $46,168.29, inventory $4,432.30**.
+Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 2025-04-24, the last delivery): **cash $45,831.43, inventory $4,676.60**.
+
+The run was checked for integrity: the database was reset once, and its April transactions total exactly what the CSV attributes to the requests ($2,787.57 sales, $2,015.84 restocking).
 
 | Outcome | Requests | Evidence |
 |---|---|---|
-| Fully fulfilled | **2** (#10, #12) | e.g. #10: 500 Glossy paper $93.00 (7% off, delivery 2025-04-15) + 300 Cardstock $43.20 (4% off) |
-| Partially fulfilled | **12** (#1–8, 11, 14, 18, 20) | Confirmed lines recorded, missing lines explained; e.g. #20: 5,000 Flyers $675 (10% off) confirmed, "2,000 posters" and "10,000 tickets" not carried |
-| Unfulfilled | **6** (#9, 13, 15, 16, 17, 19) | No line could be confirmed (each misses its deadline or is not carried); e.g. #9: "200 x A4 paper (earliest delivery 2025-04-11, after your 2025-04-10 deadline)… nothing has been charged" |
+| Fully fulfilled | **5** (#1, 4, 7, 10, 12) | e.g. #1: 200 Glossy paper $38.40 (4% off) + 100 Cardstock $15.00 + 100 Colored paper $10.00, all delivered 2025-04-01, before the 2025-04-15 deadline |
+| Partially fulfilled | **8** (#2, 3, 5, 6, 8, 14, 19, 20) | Confirmed lines recorded, missing lines explained; e.g. #20: 5,000 Flyers $675.00 + 2,000 Poster paper $450.00 (10% off), "10,000 tickets" not carried |
+| Unfulfilled | **7** (#9, 11, 13, 15, 16, 17, 18) | e.g. #13: "500 x A4 paper (earliest delivery 2025-04-12, after your 2025-04-10 deadline)… nothing has been charged"; #11: A3 glossy paper is not carried |
 | Errors | 0 | No internal errors; no fallback replies |
 
-- **Cash changes:** 14 requests booked transactions (non-zero `net_cash_effect`), and `cash_balance` changed in 10 rows at the request date. Total sales booked were $3,823.53 against $2,714.94 of restocking.
-- **Unfulfilled requests left the books untouched:** all 6 have `sales_booked = 0` and `stock_purchases_booked = 0`.
-- **Agents did the work:** the orchestrator delegates to `inventory_agent`, `quoting_agent` and `ordering_agent`. Guards were needed in 8 of 20 requests (#2, 6, 8, 11, 12, 15, 16, 19). In each, at least one order line was completed by the code because the ordering agent didn't fulfil it. The quote never had to be recalculated.
+- **Cash changes:** 13 requests booked transactions (non-zero `net_cash_effect`), and `cash_balance` changed at the request date in 8 rows. Total sales booked were $2,787.57 against $2,015.84 of restocking, a net cash gain of $771.73.
+- **Unfulfilled requests left the books untouched:** all 7 have `sales_booked = 0` and `stock_purchases_booked = 0`.
+- **Pricing checks:**
+  - #3: 10,000 A4 paper at $0.05 with 10% off = $450.00.
+  - #4: 500 Cardstock at $0.15 with 7% off = $69.75.
+  - #12: 100 Paper napkins below the 200-unit tier = $2.00 with no discount.
+- **Delivery checks:** every confirmed line's date is on or before the deadline. #19 confirmed 1,000 Cardstock for 2025-04-19 (deadline 2025-04-20) but deferred 2,000 Glossy paper, whose 7-day restock lands on 2025-04-22.
+- **Agents did the work:**
+  - Of the 19 requests with at least one valid item, the orchestrator delegated all 19 to `inventory_agent` and `quoting_agent`, and called `ordering_agent` in 14.
+  - #11 had no item the catalog carries, so no agents were needed.
+  - Guards were needed in 5 requests (#2, 6, 8, 9, 20): the ordering agent didn't complete every order line, so the code ran `fulfill_order` for the rest. The quote never had to be recalculated.
 - **Offline tests:** 14 tests (`python3 -m unittest discover -s tests -v`) pass. They cover:
-  - discount boundaries, exact catalog matching and no substitutions;
+  - discount boundaries, exact catalog matching, synonyms and no substitutions;
   - quote-only requests never writing to the database;
   - orders placed through the agents, and late orders deferred with no database writes;
   - guards completing an order when the agents fail;
@@ -79,23 +89,26 @@ Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 202
 
 ## 6. Strengths and limitations shown by testing
 **Strengths**
-- No false confirmations: every "confirmed" line meets its deadline, and the 6 unfulfilled requests changed nothing.
+- No false confirmations: every "confirmed" line meets its deadline, and the 7 unfulfilled requests changed nothing.
 - Discounts were applied consistently in every confirmed line.
-- Unknown products (balloons, streamers, tickets, A3 paper) were reported, never substituted.
+- Products the catalog doesn't carry (balloons, streamers, tickets, A3 and A5 paper, poster board) were reported, never substituted.
 - Customer replies contain no costs, margins or errors.
 
 **Limitations**
-- *Item matching is conservative.* "A4 glossy paper" (#1), "white printer paper" (#6) and "heavyweight cardstock" (#7) were treated as not carried, although Glossy paper, Standard copy paper and Cardstock exist. That cost some sales.
-- *Deadlines are tight relative to supplier lead times.* Large orders such as 10,000 A4 paper (#15) need 7 days, and 8 of the 20 requests had at least one deferred line.
-- *The ordering agent is not fully reliable.* It skipped at least one order line in 8 of 20 requests and the code had to complete it. The guards keep results correct, but this shows the LLM delegation alone is not dependable.
-- *Some sales show up in `cash_balance` later.* Sales are dated on delivery, so `cash_balance` at the request date lags. The `sales_booked` and `net_cash_effect` columns attribute them to the right request.
+- *Item matching is still somewhat conservative.* With the updated intake rules, "A4 glossy paper" (#1), "white printer paper" (#6) and "high-quality recycled cardstock" (#4) now match. But "A4 matte paper" (#8, #11), "colorful construction paper" (#6, #16), "500 reams of printer paper" (#3) and "biodegradable paper cups/plates" (#17) were still treated as not carried, although the catalog has Matte paper, Construction paper, Standard copy paper, Paper cups and Paper plates.
+- *Deadlines are tight relative to supplier lead times.* Orders over 1,000 units need 7 days. 8 of the 20 requests had at least one deferred line. Six of the 7 unfulfilled requests had at least one line deferred for timing; #11 contained only items that aren't carried.
+- *The ordering agent is not fully reliable.* It left at least one order line unfulfilled in 5 requests and the code had to complete it. The guards keep results correct, but LLM delegation alone is not dependable.
+- *Some sales show up in `cash_balance` later.* Sales are dated on delivery, so `cash_balance` at the request date lags (it changed in 8 rows, against 13 requests that booked cash). The `sales_booked` and `net_cash_effect` columns attribute amounts to the right request.
+- *Concurrent runs corrupt results.* Each run resets the shared `munder_difflin.db`. Two runs at once write into each other's database, as happened in earlier attempts, so the evaluation must run alone.
 
 ## 7. Improvements
-1. **Better item matching with confirmation.** Add a synonym table ("printer paper" → Standard copy paper, "heavyweight cardstock" → 250 gsm cardstock). For near matches, offer the item ("Did you mean Glossy paper?") instead of rejecting it. This would have turned at least three "not carried" lines in the sample into quotes or sales.
+1. **Deterministic item matching with confirmation.** Replace the LLM's free choice with a scored matcher: the product-type noun plus a synonym table ("printer paper" → Standard copy paper, "table napkins" → Paper napkins). Ask the customer to confirm near matches ("Did you mean Matte paper?") instead of rejecting them. In this run, items rejected in 6 requests could at least have been quoted (#3, 6, 8, 11, 16, 17).
 2. **Deadline-aware partial fulfilment and earlier reordering.**
    - When a deadline can't be met, offer what is in stock now and back-order the rest.
-   - Set reorder points from sales velocity and supplier lead time, so popular items (A4 paper, Cardstock) are restocked before large orders arrive. All 6 unfulfilled requests had lines deferred because the restock lead time missed the deadline.
-3. **Make the ordering agent more reliable:** give it a single-line `fulfill_order_line` tool and a structured return, then track the `agent_guards` rate. It was 8 of 20 in this run; the target is 0.
+   - Set reorder points from sales velocity and supplier lead time, so popular items (A4 paper, Cardstock, Standard copy paper) are restocked before large orders arrive. Timing caused the deferrals in 8 requests.
+3. **Make the ordering agent more reliable and isolate test runs.**
+   - Give the agent a single-line `fulfill_order_line` tool with a structured return, and track the `agent_guards` rate (5 of 20 here; the target is 0).
+   - Run each evaluation against its own temporary database file, so concurrent runs can't corrupt each other.
 
 ## 8. Configuration and running
 ```bash
