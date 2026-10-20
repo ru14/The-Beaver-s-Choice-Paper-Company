@@ -88,6 +88,8 @@ class ProjectStarterTests(unittest.TestCase):
         self.assertIsNone(app._resolve_item("A5 paper"))
         self.assertFalse(app._wording_supports("printer paper", "Poster paper"))
         self.assertTrue(app._wording_supports("A4 glossy paper", "Glossy paper"))
+        self.assertTrue(app._wording_supports("white printer paper", "Standard copy paper"))
+        self.assertFalse(app._wording_supports("A3 paper", "A4 paper"))
 
     def test_order_quote_intent_and_deadline_parsing(self):
         self.assertEqual(app._detect_intent("Could you send a quote?"), "quote")

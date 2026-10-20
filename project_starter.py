@@ -976,7 +976,12 @@ def _extract_lines(request: str) -> List[Dict]:
         "Return ONLY JSON: {\"items\": [{\"requested\": \"<customer wording>\", "
         "\"catalog_name\": \"<exact name from the catalog list, or null>\", \"quantity\": <integer>}]}\n"
         "Rules: copy catalog_name exactly from the list and only if it is the same kind of product the "
-        "customer asked for; otherwise use null. Never substitute a similar product. "
+        "customer asked for; otherwise use null. Never substitute a different product. "
+        "Match on the product type and ignore descriptive words for quality, colour, finish or standard "
+        "size: 'A4 glossy paper' -> 'Glossy paper', 'high-quality recycled cardstock in various colors' -> "
+        "'Cardstock', 'heavyweight cardstock' -> 'Cardstock', 'white printer paper' -> 'Standard copy paper', "
+        "'colorful poster paper' -> 'Poster paper'. Use null when the size or product itself is not in the "
+        "catalog: 'A3 paper', 'A5 colored paper', 'poster board', 'balloons', 'tickets' -> null. "
         "Quantity is the number the customer stated, exactly as written (e.g. '500 sheets' -> 500); "
         "never convert between units. Ignore dates and greetings.\n\n"
         f"Catalog: {json.dumps(list(CATALOG))}\n\nRequest:\n{request}"
@@ -992,10 +997,12 @@ def _extract_lines(request: str) -> List[Dict]:
 
 
 GENERIC_WORDS = {"paper", "papers", "sheet", "sheets", "of", "the", "a", "and", "with", "size", "in", "per"}
+SYNONYMS = {"printer": "copy", "printing": "copy", "copier": "copy"}  # customer wording -> catalog wording
 
 
 def _words(text: str) -> set:
-    return {w[:-1] if w.endswith("s") and len(w) > 3 else w for w in re.findall(r"[a-z0-9]+", text.lower())} - GENERIC_WORDS
+    words = {w[:-1] if w.endswith("s") and len(w) > 3 else w for w in re.findall(r"[a-z0-9]+", text.lower())}
+    return {SYNONYMS.get(w, w) for w in words} - GENERIC_WORDS
 
 
 def _wording_supports(requested: str, item: str) -> bool:

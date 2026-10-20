@@ -1,81 +1,78 @@
 request_id,request_date,status,agent_guards,sales_booked,stock_purchases_booked,net_cash_effect,cash_balance,inventory_value,response
-1,2025-04-01,partially fulfilled,none,161.2,12.6,148.6,45084.7,4915.299999999999,"Your order is confirmed for the following items (request date 2025-04-01):
+1,2025-04-01,fulfilled,none,63.4,0.0,63.4,45123.1,4875.3,"Your order is confirmed for the following items (request date 2025-04-01):
+- 200 x Glossy paper: $38.40 (4% volume discount), delivery by 2025-04-01 (meets your 2025-04-15 deadline)
 - 100 x Cardstock: $15.00, delivery by 2025-04-01 (meets your 2025-04-15 deadline)
 - 100 x Colored paper: $10.00, delivery by 2025-04-01 (meets your 2025-04-15 deadline)
-Total: $25.00
-We could not supply the following (not carried or unavailable; no substitutions made): 200 sheets of A4 glossy paper"
-2,2025-04-03,partially fulfilled,fulfill,214.59,215.95,-1.36,45084.7,4915.299999999999,"Your order is confirmed for the following items (request date 2025-04-03):
-- 500 x 220 gsm poster paper: $162.75 (7% volume discount), delivery by 2025-04-07 (meets your 2025-04-15 deadline)
-Total: $162.75
-We could not supply the following (not carried or unavailable; no substitutions made): 300 roll of streamers; 200 balloons"
-3,2025-04-04,partially fulfilled,none,589.5,484.05,105.45,45084.7,4915.299999999999,"Your order is confirmed for the following items (request date 2025-04-04):
+Total: $63.40"
+2,2025-04-03,partially fulfilled,fulfill,116.25,113.75,2.5,45123.1,4875.3,"Your order is confirmed for the following items (request date 2025-04-03):
+- 500 x Poster paper: $116.25 (7% volume discount), delivery by 2025-04-07 (meets your 2025-04-15 deadline)
+Total: $116.25
+We could not supply the following (not carried or unavailable; no substitutions made): streamers; balloons"
+3,2025-04-04,partially fulfilled,none,450.0,347.55,102.45,45123.1,4875.3,"Your order is confirmed for the following items (request date 2025-04-04):
 - 10000 x A4 paper: $450.00 (10% volume discount), delivery by 2025-04-11 (meets your 2025-04-15 deadline)
 Total: $450.00
-We could not supply the following (not carried or unavailable; no substitutions made): 5,000 sheets of A3 paper; 500 reams of printer paper"
-4,2025-04-05,partially fulfilled,none,12.0,5.92,6.08,45096.7,4902.799999999999,"Your order is confirmed for the following items (request date 2025-04-05):
+We could not supply the following (not carried or unavailable; no substitutions made): 500 reams of printer paper"
+4,2025-04-05,fulfilled,none,81.75,29.75,52.0,45135.1,4862.8,"Your order is confirmed for the following items (request date 2025-04-05):
+- 500 x Cardstock: $69.75 (7% volume discount), delivery by 2025-04-09 (meets your 2025-04-15 deadline)
 - 250 x A4 paper: $12.00 (4% volume discount), delivery by 2025-04-05 (meets your 2025-04-15 deadline)
-Total: $12.00
-We could not supply the following (not carried or unavailable; no substitutions made): 500 sheets of high-quality, recycled cardstock in various colors"
-5,2025-04-05,partially fulfilled,none,136.2,0.0,136.2,45186.399999999994,4807.8,"Your order is confirmed for the following items (request date 2025-04-05):
+Total: $81.75"
+5,2025-04-05,partially fulfilled,none,89.7,0.0,89.7,45224.799999999996,4767.8,"Your order is confirmed for the following items (request date 2025-04-05):
 - 500 x Colored paper: $46.50 (7% volume discount), delivery by 2025-04-05 (meets your 2025-04-15 deadline)
 - 300 x Cardstock: $43.20 (4% volume discount), delivery by 2025-04-05 (meets your 2025-04-15 deadline)
 Total: $89.70
 We could not supply the following (not carried or unavailable; no substitutions made): 200 rolls of decorative washi tape"
-6,2025-04-06,partially fulfilled,fulfill,61.35,55.68,5.67,45186.399999999994,4807.8,"Your order is confirmed for the following items (request date 2025-04-06):
-- 500 x Construction paper: $32.55 (7% volume discount), delivery by 2025-04-10 (meets your 2025-04-15 deadline)
+6,2025-04-06,partially fulfilled,fulfill,40.32,36.43,3.89,45224.799999999996,4767.8,"Your order is confirmed for the following items (request date 2025-04-06):
+- 300 x Standard copy paper: $11.52 (4% volume discount), delivery by 2025-04-10 (meets your 2025-04-15 deadline)
 - 200 x Cardstock: $28.80 (4% volume discount), delivery by 2025-04-10 (meets your 2025-04-15 deadline)
-Total: $61.35
-We could not supply the following (not carried or unavailable; no substitutions made): 300 sheets of white printer paper"
-7,2025-04-07,partially fulfilled,none,381.0,12.6,368.4,45570.899999999994,4407.8,"Your order is confirmed for the following items (request date 2025-04-07):
-- 500 x Glossy paper: $93.00 (7% volume discount), delivery by 2025-04-07 (meets your 2025-04-15 deadline)
-- 300 x Large poster paper (24x36 inches): $288.00 (4% volume discount), delivery by 2025-04-07 (meets your 2025-04-15 deadline)
-Total: $381.00
-We could not supply the following (not carried or unavailable; no substitutions made): 1000 sheets of matte A3 paper; 200 sheets of heavyweight cardstock"
-8,2025-04-07,partially fulfilled,fulfill,1146.0,950.67,195.33,45570.899999999994,4407.8,"Your order is confirmed for the following items (request date 2025-04-07):
+Total: $40.32
+We could not supply the following (not carried or unavailable; no substitutions made): colorful construction paper"
+7,2025-04-07,fulfilled,none,121.8,70.45,51.35,45227.299999999996,4767.8,"Your order is confirmed for the following items (request date 2025-04-07):
 - 500 x Glossy paper: $93.00 (7% volume discount), delivery by 2025-04-11 (meets your 2025-04-15 deadline)
-- 1000 x Matte paper: $162.00 (10% volume discount), delivery by 2025-04-14 (meets your 2025-04-15 deadline)
+- 200 x Cardstock: $28.80 (4% volume discount), delivery by 2025-04-11 (meets your 2025-04-15 deadline)
+Total: $121.80"
+8,2025-04-07,partially fulfilled,fulfill,309.0,223.02,85.98,45227.299999999996,4767.8,"Your order is confirmed for the following items (request date 2025-04-07):
+- 500 x Glossy paper: $93.00 (7% volume discount), delivery by 2025-04-11 (meets your 2025-04-15 deadline)
 - 3000 x Recycled paper: $216.00 (10% volume discount), delivery by 2025-04-14 (meets your 2025-04-15 deadline)
-Total: $471.00
-We could not supply the following (not carried or unavailable; no substitutions made): 2000 sheets of A5 colored paper"
-9,2025-04-07,unfulfilled,none,0.0,0.0,0.0,45570.899999999994,4407.8,"We could not confirm any item in your request.
-Not confirmed because we cannot deliver in time (nothing has been charged): 200 x A4 paper (earliest delivery 2025-04-11, after your 2025-04-10 deadline). Reply if a later delivery date works and we will place it.
+Total: $309.00
+We could not supply the following (not carried or unavailable; no substitutions made): 1000 sheets of A4 matte paper; 2000 sheets of A5 colored paper"
+9,2025-04-07,unfulfilled,fulfill,0.0,0.0,0.0,45227.299999999996,4767.8,"We could not confirm any item in your request.
+Not confirmed because we cannot deliver in time (nothing has been charged): 200 x Standard copy paper (earliest delivery 2025-04-11, after your 2025-04-10 deadline). Reply if a later delivery date works and we will place it.
 We could not supply the following (not carried or unavailable; no substitutions made): 100 sheets of A3 glossy paper; 50 packets of 100% recycled kraft paper envelopes"
-13,2025-04-08,unfulfilled,none,0.0,0.0,0.0,45694.49999999999,4280.8,"We could not confirm any item in your request.
+13,2025-04-08,unfulfilled,none,0.0,0.0,0.0,45227.299999999996,4767.8,"We could not confirm any item in your request.
 Not confirmed because we cannot deliver in time (nothing has been charged): 500 x A4 paper (earliest delivery 2025-04-12, after your 2025-04-10 deadline); 200 x Cardstock (earliest delivery 2025-04-12, after your 2025-04-10 deadline). Reply if a later delivery date works and we will place it."
-12,2025-04-08,fulfilled,fulfill,49.4,77.03,-27.63,45694.49999999999,4280.8,"Your order is confirmed for the following items (request date 2025-04-08):
+12,2025-04-08,fulfilled,none,49.4,45.53,3.87,45227.299999999996,4767.8,"Your order is confirmed for the following items (request date 2025-04-08):
 - 200 x Cardstock: $28.80 (4% volume discount), delivery by 2025-04-12 (meets your 2025-04-15 deadline)
 - 500 x Standard copy paper: $18.60 (7% volume discount), delivery by 2025-04-12 (meets your 2025-04-15 deadline)
 - 100 x Paper napkins: $2.00, delivery by 2025-04-12 (meets your 2025-04-15 deadline)
 Total: $49.40"
-10,2025-04-08,fulfilled,none,136.2,211.85,-75.65,45694.49999999999,4280.8,"Your order is confirmed for the following items (request date 2025-04-08):
-- 500 x Glossy paper: $93.00 (7% volume discount), delivery by 2025-04-15 (meets your 2025-04-15 deadline)
+10,2025-04-08,fulfilled,none,136.2,80.95,55.25,45227.299999999996,4767.8,"Your order is confirmed for the following items (request date 2025-04-08):
+- 500 x Glossy paper: $93.00 (7% volume discount), delivery by 2025-04-12 (meets your 2025-04-15 deadline)
 - 300 x Cardstock: $43.20 (4% volume discount), delivery by 2025-04-12 (meets your 2025-04-15 deadline)
 Total: $136.20"
-11,2025-04-08,partially fulfilled,fulfill,51.84,0.0,51.84,45694.49999999999,4280.8,"Your order is confirmed for the following items (request date 2025-04-08):
-- 300 x Matte paper: $51.84 (4% volume discount), delivery by 2025-04-14 (meets your 2025-04-15 deadline)
-Total: $51.84
-We could not supply the following (not carried or unavailable; no substitutions made): 500 sheets of A3 glossy paper"
-14,2025-04-09,partially fulfilled,none,139.5,136.5,3.0,45675.979999999996,4307.25,"Your order is confirmed for the following items (request date 2025-04-09):
-- 500 x 250 gsm cardstock: $139.50 (7% volume discount), delivery by 2025-04-13 (meets your 2025-04-15 deadline)
-Total: $139.50
-Not confirmed because we cannot deliver in time (nothing has been charged): 5000 x A4 paper (earliest delivery 2025-04-16, after your 2025-04-15 deadline); 2000 x 220 gsm poster paper (earliest delivery 2025-04-16, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it."
-15,2025-04-12,unfulfilled,fulfill,0.0,0.0,0.0,45733.35999999999,4432.5,"We could not confirm any item in your request.
+11,2025-04-08,unfulfilled,none,0.0,0.0,0.0,45227.299999999996,4767.8,"We could not confirm any item in your request.
+We could not supply the following (not carried or unavailable; no substitutions made): 500 sheets of A3 glossy paper; 300 sheets of A4 matte paper"
+14,2025-04-09,partially fulfilled,none,69.75,84.0,-14.25,45267.299999999996,4735.299999999999,"Your order is confirmed for the following items (request date 2025-04-09):
+- 500 x Cardstock: $69.75 (7% volume discount), delivery by 2025-04-13 (meets your 2025-04-15 deadline)
+Total: $69.75
+Not confirmed because we cannot deliver in time (nothing has been charged): 5000 x A4 paper (earliest delivery 2025-04-16, after your 2025-04-15 deadline); 2000 x Poster paper (earliest delivery 2025-04-16, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it."
+15,2025-04-12,unfulfilled,none,0.0,0.0,0.0,45530.48999999999,4647.8,"We could not confirm any item in your request.
 Not confirmed because we cannot deliver in time (nothing has been charged): 10000 x A4 paper (earliest delivery 2025-04-19, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it.
 We could not supply the following (not carried or unavailable; no substitutions made): 5,000 sheets of A3 colored paper (assorted colors); 500 reams of cardboard for signage"
-16,2025-04-13,unfulfilled,fulfill,0.0,0.0,0.0,45739.36,4432.5,"We could not confirm any item in your request.
-Not confirmed because we cannot deliver in time (nothing has been charged): 500 x A4 paper (earliest delivery 2025-04-17, after your 2025-04-15 deadline); 200 x Construction paper (earliest delivery 2025-04-17, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it.
-We could not supply the following (not carried or unavailable; no substitutions made): 100 sheets of poster board"
-17,2025-04-14,unfulfilled,none,0.0,0.0,0.0,45894.4,4382.5,"We could not confirm any item in your request.
-Not confirmed because we cannot deliver in time (nothing has been charged): 1000 x A4 paper (earliest delivery 2025-04-21, after your 2025-04-15 deadline); 2000 x Paper napkins (earliest delivery 2025-04-21, after your 2025-04-15 deadline); 1000 x Paper cups (earliest delivery 2025-04-21, after your 2025-04-15 deadline); 500 x Paper plates (earliest delivery 2025-04-18, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it.
-We could not supply the following (not carried or unavailable; no substitutions made): 500 sheets of A3 colored paper (assorted colors)"
-18,2025-04-14,partially fulfilled,none,69.75,11.34,58.41,45964.15,4307.5,"Your order is confirmed for the following items (request date 2025-04-14):
-- 500 x Cardstock: $69.75 (7% volume discount), delivery by 2025-04-14 (meets your 2025-04-15 deadline)
-Total: $69.75
-Not confirmed because we cannot deliver in time (nothing has been charged): 1000 x Standard copy paper (earliest delivery 2025-04-18, after your 2025-04-15 deadline); 200 x Colored paper (earliest delivery 2025-04-18, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it."
-19,2025-04-15,unfulfilled,fulfill,0.0,0.0,0.0,45911.12999999999,4416.1,"We could not confirm any item in your request.
-Not confirmed because we cannot deliver in time (nothing has been charged): 1000 x Cardstock (earliest delivery 2025-04-22, after your 2025-04-20 deadline). Reply if a later delivery date works and we will place it.
-We could not supply the following (not carried or unavailable; no substitutions made): 2000 sheets of A4 glossy paper; 1500 sheets of A3 matte paper"
-20,2025-04-17,partially fulfilled,none,675.0,540.75,134.25,45911.12999999999,4416.1,"Your order is confirmed for the following items (request date 2025-04-17):
+16,2025-04-13,unfulfilled,none,0.0,0.0,0.0,45516.23999999999,4692.799999999999,"We could not confirm any item in your request.
+Not confirmed because we cannot deliver in time (nothing has been charged): 500 x A4 paper (earliest delivery 2025-04-17, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it.
+We could not supply the following (not carried or unavailable; no substitutions made): 200 sheets of colorful construction paper; 100 sheets of poster board"
+17,2025-04-14,unfulfilled,none,0.0,0.0,0.0,45555.84,4692.799999999999,"We could not confirm any item in your request.
+Not confirmed because we cannot deliver in time (nothing has been charged): 1000 x Standard copy paper (earliest delivery 2025-04-18, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it.
+We could not supply the following (not carried or unavailable; no substitutions made): 500 sheets of A3 colored paper (assorted colors); 2000 table napkins (white); 1000 paper cups (biodegradable); 500 paper plates (biodegradable)"
+18,2025-04-14,unfulfilled,none,0.0,0.0,0.0,45555.84,4692.799999999999,"We could not confirm any item in your request.
+Not confirmed because we cannot deliver in time (nothing has been charged): 500 x Cardstock (earliest delivery 2025-04-18, after your 2025-04-15 deadline); 1000 x Standard copy paper (earliest delivery 2025-04-18, after your 2025-04-15 deadline); 200 x Colored paper (earliest delivery 2025-04-18, after your 2025-04-15 deadline). Reply if a later delivery date works and we will place it."
+19,2025-04-15,partially fulfilled,none,135.0,93.66,41.34,45555.84,4692.799999999999,"Your order is confirmed for the following items (request date 2025-04-15):
+- 1000 x Cardstock: $135.00 (10% volume discount), delivery by 2025-04-19 (meets your 2025-04-20 deadline)
+Total: $135.00
+Not confirmed because we cannot deliver in time (nothing has been charged): 2000 x Glossy paper (earliest delivery 2025-04-22, after your 2025-04-20 deadline). Reply if a later delivery date works and we will place it.
+We could not supply the following (not carried or unavailable; no substitutions made): 1500 sheets of A3 matte paper"
+20,2025-04-17,partially fulfilled,fulfill,1125.0,890.75,234.25,45555.84,4692.799999999999,"Your order is confirmed for the following items (request date 2025-04-17):
 - 5000 x Flyers: $675.00 (10% volume discount), delivery by 2025-04-24 (meets your 2025-05-15 deadline)
-Total: $675.00
-We could not supply the following (not carried or unavailable; no substitutions made): 2,000 posters; 10,000 tickets"
+- 2000 x Poster paper: $450.00 (10% volume discount), delivery by 2025-04-24 (meets your 2025-05-15 deadline)
+Total: $1125.00
+We could not supply the following (not carried or unavailable; no substitutions made): 10,000 tickets"
