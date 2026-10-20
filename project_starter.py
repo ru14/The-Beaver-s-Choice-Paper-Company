@@ -599,6 +599,7 @@ model = OpenAIServerModel(
     model_id=os.getenv("MODEL_ID", "gpt-4o-mini"),
     api_base=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
     api_key=os.getenv("OPENAI_API_KEY", "missing-key"),
+    temperature=0,  # deterministic intake and delegation, so evaluation runs are reproducible
 )
 
 CATALOG = {p["item_name"]: p for p in paper_supplies}

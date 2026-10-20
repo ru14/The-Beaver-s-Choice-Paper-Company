@@ -56,18 +56,18 @@ All seven required helpers are used on the request path. `generate_financial_rep
 - **Record dates:** sales are recorded on the date the goods are available, and stock orders on their delivery date.
 
 ## 5. Results from `test_results.csv` (all 20 sample requests)
-Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 2025-04-24, the last delivery): **cash $46,161.05, inventory $4,314.60**.
+Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 2025-04-24, the last delivery): **cash $46,168.29, inventory $4,432.30**.
 
 | Outcome | Requests | Evidence |
 |---|---|---|
-| Fully fulfilled | **2** (#10, #12) | e.g. #10: 500 Glossy paper $93.00 (7% off) + 300 Cardstock $43.20 (4% off) |
-| Partially fulfilled | **12** (#1–8, 11, 13, 14, 20) | Confirmed lines recorded, missing lines explained; e.g. #20: 5,000 Flyers $675 (10% off) confirmed, "2,000 posters" and "10,000 tickets" not carried |
-| Unfulfilled | **6** (#9, 15, 16, 17, 18, 19) | Every line misses the deadline; e.g. #9: "200 x A4 paper (earliest delivery 2025-04-11, after your 2025-04-10 deadline)… nothing has been charged" |
+| Fully fulfilled | **2** (#10, #12) | e.g. #10: 500 Glossy paper $93.00 (7% off, delivery 2025-04-15) + 300 Cardstock $43.20 (4% off) |
+| Partially fulfilled | **12** (#1–8, 11, 14, 18, 20) | Confirmed lines recorded, missing lines explained; e.g. #20: 5,000 Flyers $675 (10% off) confirmed, "2,000 posters" and "10,000 tickets" not carried |
+| Unfulfilled | **6** (#9, 13, 15, 16, 17, 19) | No line could be confirmed (each misses its deadline or is not carried); e.g. #9: "200 x A4 paper (earliest delivery 2025-04-11, after your 2025-04-10 deadline)… nothing has been charged" |
 | Errors | 0 | No internal errors; no fallback replies |
 
-- **Cash changes:** 14 requests booked transactions (non-zero `net_cash_effect`), and `cash_balance` changed in 8 rows at the request date. Total sales booked were $3,149.49 against $2,106.81 of restocking.
+- **Cash changes:** 14 requests booked transactions (non-zero `net_cash_effect`), and `cash_balance` changed in 10 rows at the request date. Total sales booked were $3,823.53 against $2,714.94 of restocking.
 - **Unfulfilled requests left the books untouched:** all 6 have `sales_booked = 0` and `stock_purchases_booked = 0`.
-- **Agents did the work:** the orchestrator delegates to `inventory_agent`, `quoting_agent` and `ordering_agent`. Guards were needed in 11 of 20 requests. In all 11, at least one order line was completed by the code because the ordering agent didn't fulfil it. In 2 (#3, #15), the quote also had to be recalculated.
+- **Agents did the work:** the orchestrator delegates to `inventory_agent`, `quoting_agent` and `ordering_agent`. Guards were needed in 8 of 20 requests (#2, 6, 8, 11, 12, 15, 16, 19). In each, at least one order line was completed by the code because the ordering agent didn't fulfil it. The quote never had to be recalculated.
 - **Offline tests:** 14 tests (`python3 -m unittest discover -s tests -v`) pass. They cover:
   - discount boundaries, exact catalog matching and no substitutions;
   - quote-only requests never writing to the database;
@@ -87,7 +87,7 @@ Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 202
 **Limitations**
 - *Item matching is conservative.* "A4 glossy paper" (#1), "white printer paper" (#6) and "heavyweight cardstock" (#7) were treated as not carried, although Glossy paper, Standard copy paper and Cardstock exist. That cost some sales.
 - *Deadlines are tight relative to supplier lead times.* Large orders such as 10,000 A4 paper (#15) need 7 days, and 8 of the 20 requests had at least one deferred line.
-- *The ordering agent is not fully reliable.* It skipped at least one order line in 11 of 20 requests and the code had to complete it. The guards keep results correct, but this shows the LLM delegation alone is not dependable.
+- *The ordering agent is not fully reliable.* It skipped at least one order line in 8 of 20 requests and the code had to complete it. The guards keep results correct, but this shows the LLM delegation alone is not dependable.
 - *Some sales show up in `cash_balance` later.* Sales are dated on delivery, so `cash_balance` at the request date lags. The `sales_booked` and `net_cash_effect` columns attribute them to the right request.
 
 ## 7. Improvements
@@ -95,7 +95,7 @@ Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 202
 2. **Deadline-aware partial fulfilment and earlier reordering.**
    - When a deadline can't be met, offer what is in stock now and back-order the rest.
    - Set reorder points from sales velocity and supplier lead time, so popular items (A4 paper, Cardstock) are restocked before large orders arrive. All 6 unfulfilled requests had lines deferred because the restock lead time missed the deadline.
-3. **Make the ordering agent more reliable:** give it a single-line `fulfill_order_line` tool and a structured return, then track the `agent_guards` rate. It was 11 of 20 in this run; the target is 0.
+3. **Make the ordering agent more reliable:** give it a single-line `fulfill_order_line` tool and a structured return, then track the `agent_guards` rate. It was 8 of 20 in this run; the target is 0.
 
 ## 8. Configuration and running
 ```bash
