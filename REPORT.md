@@ -1,37 +1,110 @@
 # Beaver's Choice Paper Company – Multi-Agent System Report
 
-Framework: **smolagents** (`ToolCallingAgent` + managed agents). Single source file: `project_starter.py`. Diagram: `workflow_diagram.png`.
+Framework: **smolagents** (`ToolCallingAgent` with `managed_agents`). Single source file: `project_starter.py`. Diagram: `workflow_diagram.jpg`. Evaluation output: `test_results.csv`.
 
-## Architecture (4 agents, limit is 5)
-| Agent | Responsibility | Tools |
+## 1. Business problem and objectives
+Beaver's Choice receives free-text requests for paper products ("200 sheets of A4 glossy paper by April 15"). Staff have to work out which catalog items are meant, check stock, price the order, decide whether the supplier can deliver in time, and record the sale. The aim is a text-in, text-out multi-agent system (at most 5 agents) that automates this. It must:
+- quote consistently using volume discounts and historical quotes;
+- confirm only orders it can actually fulfil by the customer's date;
+- restock sensibly without running cash below a safe level;
+- keep the SQLite inventory and cash records consistent;
+- explain clearly to the customer anything it cannot supply.
+
+## 2. Architecture: 4 agents (limit 5)
+
+| Agent | Responsibility | Tools → starter helpers |
 |---|---|---|
-| Orchestrator | Fallback only: handles a request if intake output can't be parsed; otherwise the pipeline in code coordinates the specialists | managed agents |
-| Inventory agent | Reports stock vs. reorder threshold (read-only; cannot reorder) | `find_catalog_item`, `check_stock`, `list_inventory` |
-| Quoting agent | Prices orders using volume discounts and past quotes as precedent | `find_catalog_item`, `search_past_quotes`, `calculate_quote` |
-| Ordering agent | Finalizes sales: restock if short, record transactions, report fulfilment date | `fulfill_order`, `get_finances` |
+| **Orchestrator** (`orchestrator`) | Receives the validated plan, delegates to the specialists in a fixed order (stock → price → order), and never contacts the ordering agent for quote-only requests | managed agents: `inventory_agent`, `quoting_agent`, `ordering_agent` |
+| **Inventory agent** | Reports stock vs. `min_stock_level` (read-only) | `find_catalog_item`; `check_stock` → `get_stock_level()`; `list_inventory` → `get_all_inventory()` |
+| **Quoting agent** | Prices the lines with volume discounts and checks historical quotes for precedent (read-only) | `find_catalog_item`; `search_past_quotes` → `search_quote_history()`; `calculate_quote` |
+| **Sales & fulfilment agent** (`ordering_agent`) | Checks the deadline, restocks if needed, records the sale | `fulfill_order` → `get_supplier_delivery_date()`, `restock_item` (→ `get_cash_balance()`, `create_transaction()`), `create_transaction()`; `get_finances` → `generate_financial_report()` |
 
-Flow: request → **intake (LLM)** extracts `{requested wording, catalog name or null, quantity}` → **code** validates each catalog name, decides order vs. quote, and calls the specialist agents' tools (`check_stock` → `calculate_quote` → `fulfill_order` for orders) → code writes the customer reply. The LLM never decides whether a sale is recorded, and never writes prices or delivery dates. If intake fails to parse, the orchestrator agent handles the request as a fallback.
+All seven required helpers are used on the request path. `generate_financial_report()` is also used by the evaluation loop after every request.
 
-## Business rules (enforced in application code, not left to the LLM)
-- Catalog names are matched exactly (case-insensitive); `difflib` is used only to *suggest* names. The intake model may only pick a name from the catalog list, and code additionally requires the customer's wording to share a distinctive word with it. Anything else is reported as not supplied; nothing is substituted.
-- Order vs. quote is decided in code: a request is an order unless it asks for a quote/estimate without any order wording. Quote-only requests never touch the database.
-- Pricing: list price with volume discounts: ≥200 units 4%, ≥500 7%, ≥1000 10%.
-- Supplier cost is 70% of list price; delivery lead time uses `get_supplier_delivery_date`; stock-order cash is booked on the delivery date.
-- Restock when stock is short or the sale would take stock below `min_stock_level`. For a shortfall, order the shortfall plus 1.5× the item's minimum level; for a threshold-only top-up, order 1.5× the top-up. Refused if cash would drop below a $1,000 reserve.
-- Sales are recorded on the first date the goods are available, so inventory/cash reports stay consistent with delivery timelines. Partial/unfulfillable lines are explicitly reported.
-- Delivery deadlines: the requested date ("by April 15, 2025"; the latest date mentioned; year defaults to the request year) is parsed in code and compared with each line's actual delivery date. Every line states whether it meets the deadline or is LATE (by how many days), and a closing note lists late items. Late orders are still recorded, and the customer is told. Quotes show an estimated delivery date the same way, computed read-only (no restock placed).
-- All DB access uses the provided helpers (parameterized SQL).
+**Why four agents.** Each specialist has a clear, separate job: inventory and quoting only read data, while fulfilment is the only agent that writes. Keeping the writer separate means a quote can never change the database. A fifth agent (for example a separate restocking agent) was considered and rejected. Restocking only ever happens as part of fulfilling a sale, so splitting it out would add another hand-off for the LLM to get wrong without adding any capability.
 
-## Configuration and running
-`pip install -r requirements.txt`, create `.env` with `OPENAI_API_KEY` and the provider's `OPENAI_BASE_URL` (plus optional `MODEL_ID`), then run `python project_starter.py`. It resets the DB, runs every row of `quote_requests_sample.csv` in date order, prints cash/inventory after each request and writes `test_results.csv`.
+**Request flow and hand-offs**
+1. *Intake (LLM):* the model turns the request into `{customer wording, catalog name or null, quantity}` lines.
+2. *Validation (code):* each catalog name must match exactly and share a distinctive word with the customer's wording; anything else is "not carried". Code also decides order vs. quote and parses the customer's deadline.
+3. *Delegation (orchestrator agent):* receives the validated plan and calls `inventory_agent`, then `quoting_agent`, then (orders only) `ordering_agent`.
+4. *Enforcement (tools):* the tools write their results to a per-request ledger (`REQUEST`).
+   - `fulfill_order` refuses quote-only requests and items not in the plan.
+   - It always uses the validated quantity and processes each line once.
+   - So an agent mistake cannot create an incorrect sale.
+5. *Guards (code):* if an agent skipped a step, the same tool is run directly, and this is logged in the `agent_guards` column.
+6. *Reply (code):* built from the tool results, so prices and dates are always exact. It never includes supplier costs, margins, cash figures or system errors; internal errors return a polite generic message.
 
-## Fixes to the starter
-`init_database()` was called without its engine argument, and `response` was undefined; both fixed.
+**How the diagram matches the code.**
+- The four boxes are the four `ToolCallingAgent` objects.
+- The numbered arrows ①②③ are the orchestrator's delegation order.
+- Each tool is listed next to the starter helper it calls.
+- The database arrows show that only the fulfilment agent writes.
+- The decision diamond is the per-line outcome inside `_fulfill_line`: FULFILL, DEFER or REJECT.
 
-## Testing status
-Offline business-rule tests can be run without an API key using `python -m unittest discover -s tests -v`; all 9 tests pass. They use a temporary SQLite database and a stub model to check discount boundaries, item validation, order-vs-quote routing, deadline parsing, no-substitution handling, delayed restocks, pending deliveries, quote-only read behavior, and the cash reserve.
+## 3. Framework and database
+- **smolagents:** tools are defined with `@tool` (typed arguments and docstrings), agents with `ToolCallingAgent`, and the orchestrator uses `managed_agents`. The model is `OpenAIServerModel`, defaulting to `gpt-4o-mini`, via the Vocareum OpenAI-compatible endpoint.
+- **SQLite:** `munder_difflin.db` is created by the starter's `init_database()`. Stock and cash are derived from the `transactions` table: `stock_orders` add units and cost cash, `sales` remove units and add cash. The starter's assumptions are kept: transactions are dated, and stock and cash are always computed "as of" a date.
 
-The full sample set (20 requests) was run end to end against the Vocareum endpoint (`OPENAI_BASE_URL=https://openai.vocareum.com/v1`) with no errors and no intake fallbacks; every order request was routed to fulfilment and unknown items (e.g. balloons, streamers, A3 paper) were reported rather than substituted. `test_results.csv` holds the per-request responses and cash/inventory after each.
+## 4. Business rules
+- **Pricing:** list price × (1 − volume discount): 4% for ≥200 units, 7% for ≥500, 10% for ≥1000. The same function prices both quotes and sales, so discounts are always consistent.
+- **Historical quotes:** `search_past_quotes` returns similar past requests and their explanations. These are used as precedent and context; the run's quoting agent consulted them in 11 of 20 requests. In the sample data, past quotes also discounted bulk orders, which supports the tiered discounts above. The final price comes from the deterministic formula so it can be checked.
+- **Stock and restocking:**
+  - If stock is short, use stock already on order when it arrives in time. Otherwise order the shortfall plus 1.5 × `min_stock_level` from the supplier, at 70% of list price.
+  - If a sale would take stock below the minimum level, top it up.
+  - A restock is refused if it would take cash below a $1,000 reserve.
+- **Delivery feasibility:** the earliest delivery date (from `get_supplier_delivery_date()` lead times) is compared with the customer's deadline *before* anything is written. If it is late, nothing is restocked or sold, and the customer is offered the earliest date instead.
+- **Record dates:** sales are recorded on the date the goods are available, and stock orders on their delivery date.
 
-## Possible improvements
-Offer partial or alternative-date fulfilment when a deadline can't be met (currently late orders are recorded and flagged); per-customer pricing history; learned reorder points from sales velocity.
+## 5. Results from `test_results.csv` (all 20 sample requests)
+Starting position: cash $45,059.70, inventory $4,940.30. Final report (as of 2025-04-24, the last delivery): **cash $46,049.86, inventory $4,387.15**.
+
+| Outcome | Requests | Evidence |
+|---|---|---|
+| Fully fulfilled | **3** (#4, #10, #12) | e.g. #4: 500 Cardstock $69.75 (7% off) + 250 A4 paper $12.00 (4% off) |
+| Partially fulfilled | **11** (#1–3, 5–8, 11, 14, 17, 20) | Confirmed lines recorded, missing lines explained; e.g. #20: 5,000 Flyers $675 + 2,000 Poster paper $450 (10% off), "10,000 tickets" not carried |
+| Unfulfilled | **6** (#9, 13, 15, 16, 18, 19) | Every line either misses the deadline or is not carried; e.g. #13: "500 x A4 paper (earliest delivery 2025-04-12, after your 2025-04-10 deadline)… nothing has been charged" |
+| Errors | 0 | No internal errors; no fallback replies |
+
+- **Cash changes:** 14 requests booked transactions (non-zero `net_cash_effect`), and `cash_balance` changed in 9 rows at the request date. Total sales booked were $3,270.99 against $2,280.83 of restocking.
+- **Unfulfilled requests left the books untouched:** all 6 have `sales_booked = 0` and `stock_purchases_booked = 0`.
+- **Agents did the work:** the orchestrator delegated to `inventory_agent` and `quoting_agent` in all 20 requests and to `ordering_agent` in 16. Guards were needed in 6 requests. In 6, at least one order line was completed by the code because the ordering agent didn't fulfil it. In 1 (#3), the quote also had to be recalculated.
+- **Offline tests:** 13 tests (`python -m unittest discover -s tests -v`) pass. They cover:
+  - discount boundaries, exact catalog matching and no substitutions;
+  - quote-only requests never writing to the database;
+  - orders placed through the agents, and late orders deferred with no database writes;
+  - guards completing an order when the agents fail;
+  - `fulfill_order` refusing anything outside the validated order;
+  - restocking, pending deliveries and the cash reserve;
+  - internal errors being hidden from customers.
+
+## 6. Strengths and limitations shown by testing
+**Strengths**
+- No false confirmations: every "confirmed" line meets its deadline, and the 6 deferred or unavailable requests changed nothing.
+- Discounts were applied consistently in every confirmed line.
+- Unknown products (balloons, streamers, tickets, A3 paper) were reported, never substituted.
+- Customer replies contain no costs, margins or errors.
+
+**Limitations**
+- *Item matching is conservative.* "A4 glossy paper" (#1), "white printer paper" (#6) and "heavyweight cardstock" (#7) were treated as not carried, although Glossy paper, Standard copy paper and Cardstock exist. That cost some sales.
+- *Deadlines are tight relative to supplier lead times.* Large orders such as 10,000 A4 paper (#15) need 7 days, and 8 of the 20 requests had at least one deferred line.
+- *The ordering agent is not fully reliable.* It skipped at least one order line in 6 of 20 requests and the code had to complete it. The guards keep results correct, but this shows the LLM delegation alone is not dependable.
+- *Some sales show up in `cash_balance` later.* Sales are dated on delivery, so `cash_balance` at the request date lags. The `sales_booked` and `net_cash_effect` columns attribute them to the right request.
+
+## 7. Improvements
+1. **Better item matching with confirmation.** Add a synonym table ("printer paper" → Standard copy paper, "heavyweight cardstock" → 250 gsm cardstock). For near matches, offer the item ("Did you mean Glossy paper?") instead of rejecting it. This would have turned at least three "not carried" lines in the sample into quotes or sales.
+2. **Deadline-aware partial fulfilment and earlier reordering.**
+   - When a deadline can't be met, offer what is in stock now and back-order the rest.
+   - Set reorder points from sales velocity and supplier lead time, so popular items (A4 paper, Cardstock) are restocked before large orders arrive. All 6 unfulfilled requests had lines deferred because the restock lead time missed the deadline.
+3. **Make the ordering agent more reliable:** give it a single-line `fulfill_order_line` tool and a structured return, then track the `agent_guards` rate. It was 6 of 20 in this run; the target is 0.
+
+## 8. Configuration and running
+```bash
+pip install -r requirements.txt
+```
+Create `.env` with `OPENAI_API_KEY=...` and `OPENAI_BASE_URL=https://openai.vocareum.com/v1` (optionally `MODEL_ID`). Then:
+```bash
+python project_starter.py
+```
+This resets the database, runs every row of `quote_requests_sample.csv` in date order, and writes `test_results.csv` with the columns `status`, `agent_guards`, `sales_booked`, `stock_purchases_booked`, `net_cash_effect`, `cash_balance`, `inventory_value` and `response`.
+
+Fixes to the starter: `init_database()` was called without its engine argument, and `response` was undefined in the test loop.

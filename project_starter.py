@@ -606,6 +606,24 @@ SUPPLIER_COST_RATIO = 0.7   # supplier charges 70% of list price
 RESTOCK_BUFFER = 1.5        # when restocking, order up to min_stock_level * this on top of the need
 MIN_CASH_RESERVE = 1000.0   # never let a restock drop cash below this
 
+# Per-request ledger. The orchestrator validates a plan in code, then the agents run their tools;
+# the tools write their (authoritative) results here, and the customer reply is built from this
+# ledger rather than from LLM text. Tools also enforce the plan, so an agent cannot sell
+# something the customer did not order or change a quantity.
+REQUEST = {}
+
+
+def _start_request(as_of_date: str, intent: str, deadline: Union[str, None], lines: List[Dict]) -> None:
+    plan: Dict[str, int] = {}
+    for ln in lines:  # repeated items are combined, never overwritten
+        plan[ln["item_name"]] = plan.get(ln["item_name"], 0) + ln["quantity"]
+    REQUEST.clear()
+    REQUEST.update(
+        date=as_of_date, intent=intent, deadline=deadline,
+        plan=plan,
+        stock={}, quote=None, sales={}, guards=[],
+    )
+
 
 def _resolve_item(name: str) -> Union[str, None]:
     """Resolve a catalog item by exact name, ignoring case and surrounding whitespace."""
@@ -700,6 +718,8 @@ def check_stock(item_name: str, as_of_date: str) -> str:
     if not item:
         return f"'{item_name}' is not in the catalog."
     stock = _stock(item, as_of_date)
+    if REQUEST:
+        REQUEST["stock"][item] = stock
     return json.dumps({"item": item, "stock": stock, "min_stock_level": _min_stock(item)})
 
 
@@ -765,41 +785,69 @@ def calculate_quote(items_json: str, as_of_date: str) -> str:
         if not item:
             lines.append({"item": it["item_name"], "error": "not in catalog; cannot quote"})
             continue
-        qty, disc = it["quantity"], _discount(it["quantity"])
+        qty = it["quantity"]
+        if REQUEST:
+            if item not in REQUEST["plan"]:
+                lines.append({"item": item, "error": "not part of the validated order; cannot quote"})
+                continue
+            qty = REQUEST["plan"][item]  # the validated quantity, whatever the agent passed
+        disc = _discount(qty)
         price = round(qty * _unit_price(item) * (1 - disc), 2)
         total += price
         lines.append({"item": item, "quantity": qty, "unit_price": _unit_price(item),
                       "discount": disc, "line_total": price, "in_stock": _stock(item, as_of_date)})
-    return json.dumps({"lines": lines, "total": round(total, 2)})
+    result = {"lines": lines, "total": round(total, 2)}
+    if REQUEST:
+        REQUEST["quote"] = result
+    return json.dumps(result)
 
 
 # ---------- Tools for ordering agent ----------
 
 @tool
 def fulfill_order(items_json: str, as_of_date: str) -> str:
-    """Complete a sale. For each line: restock from the supplier if stock is short (or would fall below the
-    minimum level), then record the sale on the first date the goods are available.
-    Lines that cannot be supplied are reported, never silently dropped.
+    """Complete a sale. For each line: refuse it if delivery cannot meet the customer's deadline,
+    otherwise restock from the supplier if stock is short (or would fall below the minimum level)
+    and record the sale on the first date the goods are available.
+    Only lines from the validated order are accepted, each at most once per request.
 
     Args:
         items_json: JSON list like [{"item_name": "Cardstock", "quantity": 100}].
         as_of_date: ISO date YYYY-MM-DD of the request.
     """
+    if not REQUEST:
+        return "Refused: no validated order is in progress."
+    if REQUEST["intent"] != "order":
+        return "Refused: the customer asked for a quote, not an order. Nothing was sold."
     report = []
     for it in _parse_items(items_json):
         item = _resolve_item(it["item_name"])
-        if not item:
-            report.append(f"{it['item_name']}: not in catalog, not sold.")
+        if not item or item not in REQUEST["plan"]:
+            report.append(f"{it['item_name']}: not part of the validated order, not sold.")
             continue
-        result = _fulfill_line(item, it["quantity"], as_of_date)
+        if item in REQUEST["sales"]:
+            report.append(f"{item}: already processed for this request.")
+            continue
+        qty = REQUEST["plan"][item]  # the validated quantity, whatever the agent passed
+        result = _fulfill_line(item, qty, REQUEST["date"], REQUEST["deadline"])
+        REQUEST["sales"][item] = result
         report.extend(f"{item}: {note}" for note in result["notes"])
         if result["sold"]:
-            report.append(f"{item}: sold {it['quantity']} for ${result['price']:.2f}, fulfilled by {result['sale_date']}.")
+            report.append(f"{item}: sold {qty} for ${result['price']:.2f}, fulfilled by {result['sale_date']}.")
+        elif result["reason"] == "late":
+            report.append(f"{item}: NOT sold, earliest delivery {result['ready_date']} misses the "
+                          f"{REQUEST['deadline']} deadline.")
+        else:
+            report.append(f"{item}: NOT sold, insufficient stock and restock not possible.")
     return "\n".join(report)
 
 
-def _fulfill_line(item: str, qty: int, as_of_date: str) -> Dict:
-    """Restock if needed and record one sale. Returns a structured result (internal notes included)."""
+def _fulfill_line(item: str, qty: int, as_of_date: str, deadline: Union[str, None] = None) -> Dict:
+    """Restock if needed and record one sale. Returns a structured result (internal notes included).
+    Nothing is written to the database when the line is refused."""
+    ready = _estimate_ready_date(item, qty, as_of_date)
+    if deadline and ready > deadline:
+        return {"sold": False, "reason": "late", "ready_date": ready, "notes": []}
     stock = _stock(item, as_of_date)
     sale_date = as_of_date
     notes = []
@@ -816,7 +864,7 @@ def _fulfill_line(item: str, qty: int, as_of_date: str) -> Dict:
             msg = restock_item(item, order_qty, as_of_date)
             if msg.startswith("Restock refused") or "Invalid" in msg:
                 notes.append(f"only {stock} in stock, cannot supply {qty} ({msg})")
-                return {"sold": False, "in_stock": stock, "notes": notes}
+                return {"sold": False, "reason": "stock", "in_stock": stock, "notes": notes}
             sale_date = get_supplier_delivery_date(as_of_date, order_qty)
             notes.append(msg)
     elif top_up > 0:
@@ -843,38 +891,72 @@ def get_finances(as_of_date: str) -> str:
 
 inventory_agent = ToolCallingAgent(
     tools=[find_catalog_item, check_stock, list_inventory], model=model,
-    name="inventory_agent",
-    description="Maps customer wording to catalog items and reports stock levels. Do not place orders; the ordering agent handles fulfillment.",
+    name="inventory_agent", max_steps=6,
+    description="Reports stock levels and reorder thresholds for catalog items on a date (read-only). "
+                "Give it the exact item names and the date YYYY-MM-DD.",
 )
 quoting_agent = ToolCallingAgent(
     tools=[find_catalog_item, search_past_quotes, calculate_quote], model=model,
-    name="quoting_agent",
-    description="Builds priced quotes using volume discounts and historical quotes. Give it items, quantities and the date.",
+    name="quoting_agent", max_steps=6,
+    description="Prices items with volume discounts (calculate_quote) and checks historical quotes for "
+                "precedent. Give it the items JSON and the date YYYY-MM-DD.",
 )
 ordering_agent = ToolCallingAgent(
     tools=[fulfill_order, get_finances], model=model,
-    name="ordering_agent",
-    description="Finalizes a sale: restocks if needed, records transactions, returns delivery timing. Give it items, quantities and the date.",
+    name="ordering_agent", max_steps=6,
+    description="Finalizes a sale with fulfill_order: checks the deadline, restocks if needed, records "
+                "transactions. Give it the items JSON and the date YYYY-MM-DD.",
 )
 orchestrator = ToolCallingAgent(
     tools=[], managed_agents=[inventory_agent, quoting_agent, ordering_agent], model=model,
-    name="orchestrator", max_steps=12,
+    name="orchestrator", max_steps=10,
     instructions=(
-        "You handle customer paper requests for the Beaver's Choice Paper Company. Workflow: "
-        "1) extract items/quantities (use the catalog names) and the request date; "
-        "2) ask inventory_agent for the catalog names and stock; "
-        "3) ask quoting_agent for a quote; "
-        "4) if the customer is ordering, ask ordering_agent to fulfill it; "
-        "5) reply with a short customer-friendly message: items, prices, discounts, total, delivery date, "
-        "and clearly state anything that could not be supplied. Never reveal internal costs, margins or "
-        "database details. Always pass dates as YYYY-MM-DD."
+        "You coordinate customer paper requests for the Beaver's Choice Paper Company. You receive a "
+        "validated plan (exact catalog items, quantities, date, intent). Delegate in this order: "
+        "1) inventory_agent: check stock of every item on the request date; "
+        "2) quoting_agent: price the exact items JSON with calculate_quote (and search past quotes); "
+        "3) only if the intent is ORDER: ordering_agent: call fulfill_order with the exact items JSON "
+        "and date. Never contact ordering_agent for a QUOTE. Pass items and quantities unchanged and "
+        "dates as YYYY-MM-DD. Finish with a one-sentence internal summary of what each agent reported."
     ),
 )
 
-# ---------- Enforced request pipeline ----------
-# The LLM only does intake (free text -> structured lines). Everything after that is code:
-# exact catalog validation, order-vs-quote routing, tool calls through the specialist agents'
-# tools, and the customer reply. Unknown items are reported, never substituted.
+
+def _run_agents(request: str) -> None:
+    """Hand the validated plan to the orchestrator, which delegates to the specialist agents."""
+    items_json = json.dumps([{"item_name": i, "quantity": q} for i, q in REQUEST["plan"].items()])
+    task = (
+        f"Request date: {REQUEST['date']}\n"
+        f"Intent: {REQUEST['intent'].upper()}\n"
+        f"Customer deadline: {REQUEST['deadline'] or 'none stated'}\n"
+        f"Validated items JSON: {items_json}\n\n"
+        f"Original customer request (for context only):\n{request}"
+    )
+    orchestrator.run(task)
+
+
+def _apply_guards() -> None:
+    """If an agent skipped or mangled a step, run the tool directly so every request is handled
+    by the same rules. Recorded in REQUEST['guards'] for the evaluation log."""
+    items_json = json.dumps([{"item_name": i, "quantity": q} for i, q in REQUEST["plan"].items()])
+    quoted = [(ln["item"], ln["quantity"]) for ln in (REQUEST["quote"] or {}).get("lines", [])
+              if "error" not in ln]
+    if sorted(quoted) != sorted(REQUEST["plan"].items()):
+        calculate_quote(items_json=items_json, as_of_date=REQUEST["date"])
+        REQUEST["guards"].append("quote")
+    if REQUEST["intent"] == "order":
+        missing = [i for i in REQUEST["plan"] if i not in REQUEST["sales"]]
+        if missing:
+            fulfill_order(items_json=json.dumps([{"item_name": i, "quantity": REQUEST["plan"][i]} for i in missing]),
+                          as_of_date=REQUEST["date"])
+            REQUEST["guards"].append("fulfill")
+
+
+# ---------- Request pipeline ----------
+# Intake (LLM) turns free text into structured lines; code validates them against the catalog and
+# decides order vs. quote; the orchestrator agent then delegates to the specialist agents, whose
+# tools enforce the business rules and write results to REQUEST; the customer reply is built from
+# REQUEST. Unknown items are reported, never substituted.
 
 QUOTE_ONLY_RE = re.compile(r"\b(quote|quotation|estimate|how much|price list|pricing)\b", re.I)
 ORDER_RE = re.compile(r"\b(order|purchase|buy|place|confirm)\b", re.I)
@@ -977,50 +1059,91 @@ def _handle_request(request: str) -> str:
         else:
             unavailable.append(ln["requested"])
 
-    out, total, late = [], 0.0, []
+    _start_request(as_of_date, intent, deadline, valid)
     if valid:
-        # inventory agent's tools: confirm stock; quoting agent's tool: price; ordering agent's tool: sell
-        quote = json.loads(quoting_agent.tools["calculate_quote"](items_json=json.dumps(valid), as_of_date=as_of_date))
-        for q in quote["lines"]:
-            disc = f" ({int(q['discount'] * 100)}% volume discount)" if q["discount"] else ""
-            if intent == "quote":
-                ready = _estimate_ready_date(q["item"], q["quantity"], as_of_date)
-                out.append(f"- {q['quantity']} x {q['item']}: ${q['line_total']:.2f}{disc}, "
-                           f"estimated {_timing(ready, deadline)}")
-                total += q["line_total"]
-                if deadline and ready > deadline:
-                    late.append(q["item"])
-                continue
-            result = _fulfill_line(q["item"], q["quantity"], as_of_date)
-            if result["sold"]:
-                out.append(f"- {q['quantity']} x {q['item']}: ${result['price']:.2f}{disc}, "
-                           f"{_timing(result['sale_date'], deadline)}")
-                total += result["price"]
-                if deadline and result["sale_date"] > deadline:
-                    late.append(q["item"])
-            else:
-                unavailable.append(f"{q['quantity']} x {q['item']} (insufficient stock and could not be restocked)")
+        try:
+            _run_agents(request)
+        except Exception as e:  # agent/LLM failure: the guards below still apply the same rules
+            print(f"WARN: orchestrator run failed ({e}); applying guards")
+        _apply_guards()
 
-    header = "Here is your quote" if intent == "quote" else "Your order has been placed"
-    parts = [f"{header} (request date {as_of_date}):"] if out else ["We could not process any item in your request."]
+    out, total, late, deferred = [], 0.0, [], []
+    for q in (REQUEST["quote"] or {}).get("lines", []):
+        if "error" in q:
+            continue
+        disc = f" ({int(q['discount'] * 100)}% volume discount)" if q["discount"] else ""
+        if intent == "quote":
+            ready = _estimate_ready_date(q["item"], q["quantity"], as_of_date)
+            out.append(f"- {q['quantity']} x {q['item']}: ${q['line_total']:.2f}{disc}, "
+                       f"estimated {_timing(ready, deadline)}")
+            total += q["line_total"]
+            if deadline and ready > deadline:
+                late.append(q["item"])
+            continue
+        result = REQUEST["sales"].get(q["item"], {"sold": False, "reason": "stock"})
+        if result["sold"]:
+            out.append(f"- {q['quantity']} x {q['item']}: ${result['price']:.2f}{disc}, "
+                       f"{_timing(result['sale_date'], deadline)}")
+            total += result["price"]
+        elif result["reason"] == "late":
+            deferred.append(f"{q['quantity']} x {q['item']} (earliest delivery {result['ready_date']}, "
+                            f"after your {deadline} deadline)")
+        else:
+            unavailable.append(f"{q['quantity']} x {q['item']} (insufficient stock and could not be restocked in time)")
+
+    if intent == "quote":
+        REQUEST["status"] = "quoted" if out else "unfulfilled"
+    elif out:
+        REQUEST["status"] = "fulfilled" if not (deferred or unavailable) else "partially fulfilled"
+    else:
+        REQUEST["status"] = "unfulfilled"
+
+    if intent == "quote":
+        header = "Here is your quote"
+    else:
+        header = "Your order is confirmed for the following items"
+    parts = [f"{header} (request date {as_of_date}):"] if out else [
+        "We could not quote any item in your request." if intent == "quote"
+        else "We could not confirm any item in your request."]
     parts += out
     if out:
         parts.append(f"Total: ${total:.2f}")
     if late:
         parts.append("Note: we cannot deliver the following by your requested date: " + ", ".join(late)
                      + ". Please contact us if the later delivery date does not work for you.")
+    if deferred:
+        parts.append("Not confirmed because we cannot deliver in time (nothing has been charged): "
+                     + "; ".join(deferred) + ". Reply if a later delivery date works and we will place it.")
     if unavailable:
         parts.append("We could not supply the following (not carried or unavailable; no substitutions made): "
                      + "; ".join(unavailable))
     return "\n".join(parts)
 
 
+SAFE_ERROR_REPLY = ("We're sorry, we couldn't process your request right now. Please resend it listing each "
+                    "item and quantity, and we'll get back to you with a quote.")
+
+
 def call_your_multi_agent_system(request: str) -> str:
+    """Customer-facing entry point: always returns a customer-safe message, never an internal error."""
+    REQUEST.clear()
     try:
         return _handle_request(request)
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
-        print(f"WARN: intake failed ({e}); falling back to the orchestrator agent")
-        return str(orchestrator.run(request))
+    except Exception as e:
+        print(f"ERROR (internal, not shown to customer): {type(e).__name__}: {e}")
+        if not REQUEST:
+            _start_request("", "order", None, [])
+        REQUEST["status"] = "error"
+        return SAFE_ERROR_REPLY
+
+
+def _last_transaction_id() -> int:
+    return int(pd.read_sql("SELECT COALESCE(MAX(rowid), 0) AS m FROM transactions", db_engine)["m"].iloc[0])
+
+
+def _transactions_since(txn_id: int) -> pd.DataFrame:
+    return pd.read_sql("SELECT transaction_type, price, transaction_date FROM transactions WHERE rowid > :i",
+                       db_engine, params={"i": txn_id})
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.
@@ -1056,14 +1179,22 @@ def run_test_scenarios():
         print(f"Inventory Value: ${current_inventory:.2f}")
 
         request_with_date = f"{row['request']} (Date of request: {request_date})"
+        txn_before = _last_transaction_id()
         try:
             response = call_your_multi_agent_system(request_with_date)
-        except Exception as e:
-            response = f"ERROR: {e}"
+        except Exception as e:  # call_your_multi_agent_system already catches; keep errors out of the reply
+            print(f"ERROR (internal): {e}")
+            response = SAFE_ERROR_REPLY
 
         report = generate_financial_report(request_date)
         current_cash = report["cash_balance"]
         current_inventory = report["inventory_value"]
+
+        # Cash effect of this request. Sales/restocks are dated on the delivery date, so some only
+        # show up in cash_balance on a later date; these columns attribute them to the request.
+        new_txns = _transactions_since(txn_before)
+        sales_booked = float(new_txns.loc[new_txns["transaction_type"] == "sales", "price"].sum())
+        purchases_booked = float(new_txns.loc[new_txns["transaction_type"] == "stock_orders", "price"].sum())
 
         print(f"Response: {response}")
         print(f"Updated Cash: ${current_cash:.2f}")
@@ -1073,6 +1204,11 @@ def run_test_scenarios():
             {
                 "request_id": idx + 1,
                 "request_date": request_date,
+                "status": REQUEST.get("status", "error"),
+                "agent_guards": ",".join(REQUEST.get("guards", [])) or "none",
+                "sales_booked": round(sales_booked, 2),
+                "stock_purchases_booked": round(purchases_booked, 2),
+                "net_cash_effect": round(sales_booked - purchases_booked, 2),
                 "cash_balance": current_cash,
                 "inventory_value": current_inventory,
                 "response": response,
@@ -1081,9 +1217,11 @@ def run_test_scenarios():
 
         time.sleep(1)
 
-    final_date = quote_requests_sample["request_date"].max().strftime("%Y-%m-%d")
+    # Include deliveries dated after the last request so every booked sale and restock is counted.
+    last_txn_date = pd.read_sql("SELECT MAX(date(transaction_date)) AS d FROM transactions", db_engine)["d"].iloc[0]
+    final_date = max(quote_requests_sample["request_date"].max().strftime("%Y-%m-%d"), last_txn_date or "")
     final_report = generate_financial_report(final_date)
-    print("\n===== FINAL FINANCIAL REPORT =====")
+    print(f"\n===== FINAL FINANCIAL REPORT (as of {final_date}) =====")
     print(f"Final Cash: ${final_report['cash_balance']:.2f}")
     print(f"Final Inventory: ${final_report['inventory_value']:.2f}")
 
