@@ -36,33 +36,39 @@ All the files have been provided in the VS Code workspace on the Udacity platfor
 
 1. Install dependencies
 
-Make sure you have Python 3.8+ installed.
+Make sure you have Python 3.10 or later installed.
 
 You can install all required packages using the provided requirements.txt file:
 
 `pip install -r requirements.txt`
 
-If you're using smolagents, install it separately:
+2. Create a `.env` file in the project root
 
-`pip install smolagents`
+Add your OpenAI-compatible API key and endpoint:
 
-For other options like pydantic-ai or npcsh[lite], refer to their documentation.
+```dotenv
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=https://openai.vocareum.com/v1
+MODEL_ID=gpt-4o-mini
+```
 
-2. Create .env File
-
-Add your OpenAI-compatible API key:
-
-`UDACITY_OPENAI_API_KEY=your_openai_key_here`
-
-This project uses a custom OpenAI-compatible proxy hosted at https://openai.vocareum.com/v1.
+`OPENAI_BASE_URL` defaults to OpenAI's API URL; set it to the URL for any other provider, including the Vocareum endpoint shown above. `MODEL_ID` defaults to `gpt-4o-mini`. The API key is required only for the live agent run; the offline tests do not call an LLM.
 
 ## How to Run the Project
 
-Start by defining your agents in the `"YOUR MULTI AGENT STARTS HERE"` section inside `template.py`. Once your agent team is ready:
+Run the offline business-rule tests:
 
-1. Run the `run_test_scenarios()` function at the bottom of the script.
-2. This will simulate a series of customer requests.
-3. Your system should respond by coordinating inventory checks, generating quotes, and processing orders.
+```sh
+python -m unittest discover -s tests -v
+```
+
+Run the full, live sample set:
+
+```sh
+python project_starter.py
+```
+
+The live run resets `munder_difflin.db`, processes every row in `quote_requests_sample.csv` in date order, and writes `test_results.csv`. It makes live model calls and requires a valid API key and endpoint.
 
 Output will include:
 
@@ -89,7 +95,7 @@ Make sure to submit the following files:
 
 1. Your completed `template.py` or `project_starter.py` with all agent logic
 2. A **workflow diagram** describing your agent architecture and data flow
-3. A `README.txt` or `design_notes.txt` explaining how your system works
+3. A README or design notes explaining how your system works
 4. Outputs from your test run (like `test_results.csv`)
 
 ---
