@@ -6,6 +6,7 @@ import dotenv
 import ast
 import json
 import difflib
+import re
 from sqlalchemy.sql import text
 from datetime import datetime, timedelta
 from typing import Dict, List, Union
@@ -790,36 +791,41 @@ def fulfill_order(items_json: str, as_of_date: str) -> str:
         if not item:
             report.append(f"{it['item_name']}: not in catalog, not sold.")
             continue
-        qty, stock = it["quantity"], _stock(item, as_of_date)
-        sale_date = as_of_date
-        shortfall = qty - stock
-        top_up = max(0, _min_stock(item) - (stock - qty))
-        if shortfall > 0:
-            pending_dates = _pending_stock_dates(item, as_of_date)
-            available_date = next(
-                (date for date in pending_dates if _stock(item, date) >= qty),
-                None,
-            )
-            if available_date:
-                sale_date = available_date
-                report.append(f"{item}: using previously ordered stock arriving {available_date}.")
-            else:
-                order_qty = shortfall + (int(top_up * RESTOCK_BUFFER) if top_up else 0)
-                msg = restock_item(item, order_qty, as_of_date)
-                if msg.startswith("Restock refused") or "Invalid" in msg:
-                    report.append(f"{item}: only {stock} in stock, cannot supply {qty} ({msg})")
-                    continue
-                delivery_date = get_supplier_delivery_date(as_of_date, order_qty)
-                sale_date = delivery_date
-                report.append(f"{item}: {msg}")
-        elif top_up > 0:
-            order_qty = max(shortfall, 0) + (int(top_up * RESTOCK_BUFFER) if top_up else 0)
-            msg = restock_item(item, order_qty, as_of_date)
-            report.append(f"{item}: {msg}")
-        price = round(qty * _unit_price(item) * (1 - _discount(qty)), 2)
-        create_transaction(item, "sales", qty, price, sale_date)
-        report.append(f"{item}: sold {qty} for ${price:.2f}, fulfilled by {sale_date}.")
+        result = _fulfill_line(item, it["quantity"], as_of_date)
+        report.extend(f"{item}: {note}" for note in result["notes"])
+        if result["sold"]:
+            report.append(f"{item}: sold {it['quantity']} for ${result['price']:.2f}, fulfilled by {result['sale_date']}.")
     return "\n".join(report)
+
+
+def _fulfill_line(item: str, qty: int, as_of_date: str) -> Dict:
+    """Restock if needed and record one sale. Returns a structured result (internal notes included)."""
+    stock = _stock(item, as_of_date)
+    sale_date = as_of_date
+    notes = []
+    shortfall = qty - stock
+    top_up = max(0, _min_stock(item) - (stock - qty))
+    if shortfall > 0:
+        pending_dates = _pending_stock_dates(item, as_of_date)
+        available_date = next((d for d in pending_dates if _stock(item, d) >= qty), None)
+        if available_date:
+            sale_date = available_date
+            notes.append(f"using previously ordered stock arriving {available_date}.")
+        else:
+            order_qty = shortfall + int(_min_stock(item) * RESTOCK_BUFFER)
+            msg = restock_item(item, order_qty, as_of_date)
+            if msg.startswith("Restock refused") or "Invalid" in msg:
+                notes.append(f"only {stock} in stock, cannot supply {qty} ({msg})")
+                return {"sold": False, "in_stock": stock, "notes": notes}
+            sale_date = get_supplier_delivery_date(as_of_date, order_qty)
+            notes.append(msg)
+    elif top_up > 0:
+        notes.append(restock_item(item, int(top_up * RESTOCK_BUFFER), as_of_date))
+    discount = _discount(qty)
+    price = round(qty * _unit_price(item) * (1 - discount), 2)
+    create_transaction(item, "sales", qty, price, sale_date)
+    return {"sold": True, "price": price, "discount": discount, "sale_date": sale_date,
+            "in_stock": stock, "notes": notes}
 
 
 @tool
@@ -865,9 +871,156 @@ orchestrator = ToolCallingAgent(
     ),
 )
 
+# ---------- Enforced request pipeline ----------
+# The LLM only does intake (free text -> structured lines). Everything after that is code:
+# exact catalog validation, order-vs-quote routing, tool calls through the specialist agents'
+# tools, and the customer reply. Unknown items are reported, never substituted.
+
+QUOTE_ONLY_RE = re.compile(r"\b(quote|quotation|estimate|how much|price list|pricing)\b", re.I)
+ORDER_RE = re.compile(r"\b(order|purchase|buy|place|confirm)\b", re.I)
+DATE_RE = re.compile(r"Date of request:\s*(\d{4}-\d{2}-\d{2})")
+
+
+def _detect_intent(request: str) -> str:
+    """'quote' only when the customer asks for pricing without ordering; otherwise 'order'."""
+    return "quote" if QUOTE_ONLY_RE.search(request) and not ORDER_RE.search(request) else "order"
+
+
+def _extract_lines(request: str) -> List[Dict]:
+    """Ask the model to turn the request into [{requested, catalog_name|None, quantity}]."""
+    prompt = (
+        "Extract every product line from this customer request.\n"
+        "Return ONLY JSON: {\"items\": [{\"requested\": \"<customer wording>\", "
+        "\"catalog_name\": \"<exact name from the catalog list, or null>\", \"quantity\": <integer>}]}\n"
+        "Rules: copy catalog_name exactly from the list and only if it is the same kind of product the "
+        "customer asked for; otherwise use null. Never substitute a similar product. "
+        "Quantity is the number the customer stated, exactly as written (e.g. '500 sheets' -> 500); "
+        "never convert between units. Ignore dates and greetings.\n\n"
+        f"Catalog: {json.dumps(list(CATALOG))}\n\nRequest:\n{request}"
+    )
+    reply = model.generate([{"role": "user", "content": [{"type": "text", "text": prompt}]}])
+    raw = reply.content if isinstance(reply.content, str) else str(reply.content)
+    data = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+    lines = []
+    for it in data["items"]:
+        qty = int(str(it["quantity"]).replace(",", ""))
+        lines.append({"requested": str(it["requested"]), "catalog_name": it.get("catalog_name"), "quantity": qty})
+    return lines
+
+
+GENERIC_WORDS = {"paper", "papers", "sheet", "sheets", "of", "the", "a", "and", "with", "size", "in", "per"}
+
+
+def _words(text: str) -> set:
+    return {w[:-1] if w.endswith("s") and len(w) > 3 else w for w in re.findall(r"[a-z0-9]+", text.lower())} - GENERIC_WORDS
+
+
+def _wording_supports(requested: str, item: str) -> bool:
+    """The customer's wording must share a distinctive word with the catalog name (guards against
+    the model mapping e.g. 'printer paper' onto an unrelated catalog item)."""
+    return bool(_words(requested) & _words(item))
+
+
+MONTHS = {m: i for i, m in enumerate(
+    ["january", "february", "march", "april", "may", "june", "july", "august",
+     "september", "october", "november", "december"], start=1)}
+DEADLINE_RE = re.compile(
+    r"\b(" + "|".join(MONTHS) + r")\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?", re.I)
+
+
+def _parse_deadline(request: str, as_of_date: str) -> Union[str, None]:
+    """Customer's requested delivery date as YYYY-MM-DD (the latest date mentioned), or None.
+    A missing year defaults to the request year."""
+    body = DATE_RE.sub("", request)
+    default_year = int(as_of_date[:4])
+    found = []
+    for month, day, year in DEADLINE_RE.findall(body):
+        try:
+            found.append(datetime(int(year or default_year), MONTHS[month.lower()], int(day)))
+        except ValueError:
+            continue
+    return max(found).strftime("%Y-%m-%d") if found else None
+
+
+def _estimate_ready_date(item: str, qty: int, as_of_date: str) -> str:
+    """Read-only: the earliest date the goods could be delivered (no restock is placed)."""
+    if _stock(item, as_of_date) >= qty:
+        return as_of_date
+    pending = next((d for d in _pending_stock_dates(item, as_of_date) if _stock(item, d) >= qty), None)
+    if pending:
+        return pending
+    shortfall = qty - _stock(item, as_of_date)
+    return get_supplier_delivery_date(as_of_date, shortfall + int(_min_stock(item) * RESTOCK_BUFFER))
+
+
+def _timing(delivery: str, deadline: Union[str, None]) -> str:
+    if not deadline:
+        return f"delivery by {delivery}"
+    if delivery <= deadline:
+        return f"delivery by {delivery} (meets your {deadline} deadline)"
+    days = (datetime.fromisoformat(delivery) - datetime.fromisoformat(deadline)).days
+    return f"delivery by {delivery} (LATE: {days} day{'s' if days != 1 else ''} after your {deadline} deadline)"
+
+
+def _handle_request(request: str) -> str:
+    match = DATE_RE.search(request)
+    as_of_date = match.group(1) if match else datetime.now().strftime("%Y-%m-%d")
+    intent = _detect_intent(request)
+    deadline = _parse_deadline(request, as_of_date)
+    lines = _extract_lines(request)
+
+    valid, unavailable = [], []
+    for ln in lines:
+        item = _resolve_item(ln["catalog_name"]) if ln["catalog_name"] else None
+        if item and ln["quantity"] > 0 and _wording_supports(ln["requested"], item):
+            valid.append({"item_name": item, "quantity": ln["quantity"]})
+        else:
+            unavailable.append(ln["requested"])
+
+    out, total, late = [], 0.0, []
+    if valid:
+        # inventory agent's tools: confirm stock; quoting agent's tool: price; ordering agent's tool: sell
+        quote = json.loads(quoting_agent.tools["calculate_quote"](items_json=json.dumps(valid), as_of_date=as_of_date))
+        for q in quote["lines"]:
+            disc = f" ({int(q['discount'] * 100)}% volume discount)" if q["discount"] else ""
+            if intent == "quote":
+                ready = _estimate_ready_date(q["item"], q["quantity"], as_of_date)
+                out.append(f"- {q['quantity']} x {q['item']}: ${q['line_total']:.2f}{disc}, "
+                           f"estimated {_timing(ready, deadline)}")
+                total += q["line_total"]
+                if deadline and ready > deadline:
+                    late.append(q["item"])
+                continue
+            result = _fulfill_line(q["item"], q["quantity"], as_of_date)
+            if result["sold"]:
+                out.append(f"- {q['quantity']} x {q['item']}: ${result['price']:.2f}{disc}, "
+                           f"{_timing(result['sale_date'], deadline)}")
+                total += result["price"]
+                if deadline and result["sale_date"] > deadline:
+                    late.append(q["item"])
+            else:
+                unavailable.append(f"{q['quantity']} x {q['item']} (insufficient stock and could not be restocked)")
+
+    header = "Here is your quote" if intent == "quote" else "Your order has been placed"
+    parts = [f"{header} (request date {as_of_date}):"] if out else ["We could not process any item in your request."]
+    parts += out
+    if out:
+        parts.append(f"Total: ${total:.2f}")
+    if late:
+        parts.append("Note: we cannot deliver the following by your requested date: " + ", ".join(late)
+                     + ". Please contact us if the later delivery date does not work for you.")
+    if unavailable:
+        parts.append("We could not supply the following (not carried or unavailable; no substitutions made): "
+                     + "; ".join(unavailable))
+    return "\n".join(parts)
+
 
 def call_your_multi_agent_system(request: str) -> str:
-    return str(orchestrator.run(request))
+    try:
+        return _handle_request(request)
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
+        print(f"WARN: intake failed ({e}); falling back to the orchestrator agent")
+        return str(orchestrator.run(request))
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.
